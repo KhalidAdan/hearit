@@ -87,3 +87,17 @@ Format: date noticed · what happened · suspected stage · fix shape.
   and the espeak pause at once. Ordering fact #2 for the pass: it runs
   pre-split, not per-sentence.
 - **Status:** logged. First entry implicating hearit's own code.
+
+## 6. Hash before a number is "Hash"
+
+- **2026-08-01** — `PR #1000` spoken as "PR Hash 1000". Correct: "PR
+  number one thousand". `#` flanking digits means "number" in English;
+  the sidecar names the symbol instead of translating it.
+- **Stage:** sidecar symbol normalization — same family as #1's `$`:
+  symbols whose English reading depends on their position relative to
+  the number.
+- **Fix shape:** joins the symbol rules in the pass: `#N` → "number N".
+  Rule family so far: `$` (reorder + "dollars"), `#` ("number"),
+  presumably `%` is fine (it said "percent" in #2), watch for `°`, `£`,
+  `€`, `&`.
+- **Status:** logged, clustering with #1.
