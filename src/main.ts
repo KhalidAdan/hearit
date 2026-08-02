@@ -138,6 +138,11 @@ const onPressed = (stampMs: number) =>
       return yield* stopSpeaking;
     }
 
+    // The engine may be asleep (tray: free VRAM). Waking is idempotent —
+    // one cheap IPC when it's already up — and synth_waiting's patience
+    // absorbs the warmup when it isn't.
+    yield* cmd("engine_start").pipe(Effect.ignore);
+
     // New selection wins: speak_begin stops the old voice inside Rust and
     // hands back a take token — audio from any older take can never reach
     // the speaker once this returns.
@@ -271,9 +276,12 @@ void listen("sidecar_ready", () =>
   console.log("[hearit] engine warm — the key is live"),
 );
 // An update was downloaded and staged (update.rs); it applies on next
-// launch. No tray yet to note it in, so the console is the ledger.
+// launch. The console is the ledger.
 void listen<string>("update_installed", (e) =>
   console.log(`[hearit] v${e.payload} staged — takes effect next launch`),
+);
+void listen("engine_sleeping", () =>
+  console.log("[hearit] engine asleep — next press wakes it"),
 );
 void listen("pipeline_error", (e) =>
   console.error("[hearit] pipeline error:", e.payload),

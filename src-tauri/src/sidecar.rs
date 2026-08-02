@@ -63,6 +63,18 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Put the engine to sleep: kill the process, free the VRAM. Only the
+/// tray calls this; the next press wakes it (the coordinator calls
+/// engine_start on every take, and synth_waiting absorbs the warmup).
+pub fn sleep(app: &AppHandle) {
+    if let Some(mut child) = app.state::<Sidecar>().0.lock().unwrap().take() {
+        let _ = child.kill();
+        app.state::<Ready>().0.store(false, Ordering::Relaxed);
+        println!("[hearit] engine sleeping — VRAM freed");
+        let _ = app.emit("engine_sleeping", ());
+    }
+}
+
 /// Warm the engine with one throwaway synthesis. Success doubles as the
 /// readiness probe: `sidecar_ready` means "warm and listening", so the
 /// first real press of the day speaks as fast as the hundredth.

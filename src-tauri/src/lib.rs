@@ -12,6 +12,7 @@ mod paths;
 mod sidecar;
 mod speak;
 mod synth;
+mod tray;
 mod update;
 
 use std::io::Write;
@@ -237,10 +238,12 @@ pub fn run() {
         .manage(sidecar::Sidecar(Mutex::default()))
         .manage(sidecar::Ready::default())
         .manage(Takes::default())
+        .manage(tray::Tray::default())
         .setup(|app| {
             // The speaker is managed here, not before setup, because its
             // FFT monitor needs an AppHandle to emit viz_heights.
             app.manage(speak::start(app.handle())?);
+            tray::build(app.handle())?;
             sidecar::start(app.handle())?;
             tauri::async_runtime::spawn(update::check_and_install(app.handle().clone()));
             println!("[hearit] speak key on {}", hotkey::SPEAK_KEY);

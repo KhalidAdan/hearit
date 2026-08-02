@@ -1,0 +1,79 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- keycap top face: dark zinc, lit from above — sayit's cap, same house -->
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#32323a"/>
+      <stop offset="0.55" stop-color="#222228"/>
+      <stop offset="1" stop-color="#1a1a1f"/>
+    </linearGradient>
+    <!-- keycap base/side: darker, reads as depth -->
+    <linearGradient id="side" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#141417"/>
+      <stop offset="1" stop-color="#0b0b0d"/>
+    </linearGradient>
+    <!-- matrix green, lit at the top like a diffused emitter -->
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4aae5e"/>
+      <stop offset="0.5" stop-color="#38944c"/>
+      <stop offset="1" stop-color="#2d7a3e"/>
+    </linearGradient>
+    <linearGradient id="cap" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6fd682"/>
+      <stop offset="1" stop-color="#50be62"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="0.5" cy="0.12" r="0.9">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- keycap base (the part you see below the top face) -->
+  <rect x="72" y="104" width="880" height="856" rx="200" fill="url(#side)"/>
+  <!-- keycap top face, sitting high like a real cap -->
+  <rect x="104" y="120" width="816" height="768" rx="168" fill="url(#face)"/>
+  <!-- inset ring for definition (dark-mode rule: ring, not shadow) -->
+  <rect x="104" y="120" width="816" height="768" rx="168" fill="none"
+        stroke="#ffffff" stroke-opacity="0.09" stroke-width="6"/>
+  <!-- soft sheen across the cap -->
+  <rect x="104" y="120" width="816" height="768" rx="168" fill="url(#sheen)"/>
+
+  <!-- the legend: hearit's dot matrix mid-sentence — 6 columns x 4 rows,
+       topmost lit cell lighter, exactly the pill's grammar. Unlit cells
+       stay faint so the grid reads at large sizes and vanishes cleanly
+       at tray size, where the green shape carries the icon. -->
+  <!-- unlit -->
+  <g fill="#1b2229" fill-opacity="0.85">
+    <rect x="200" y="300" width="84" height="84" rx="22"/>
+    <rect x="200" y="408" width="84" height="84" rx="22"/>
+    <rect x="308" y="300" width="84" height="84" rx="22"/>
+    <rect x="524" y="300" width="84" height="84" rx="22"/>
+    <rect x="632" y="300" width="84" height="84" rx="22"/>
+    <rect x="632" y="408" width="84" height="84" rx="22"/>
+    <rect x="740" y="300" width="84" height="84" rx="22"/>
+    <rect x="740" y="408" width="84" height="84" rx="22"/>
+    <rect x="740" y="516" width="84" height="84" rx="22"/>
+  </g>
+  <!-- lit bodies -->
+  <g fill="url(#body)">
+    <rect x="200" y="624" width="84" height="84" rx="22"/>
+    <rect x="308" y="516" width="84" height="84" rx="22"/>
+    <rect x="308" y="624" width="84" height="84" rx="22"/>
+    <rect x="416" y="408" width="84" height="84" rx="22"/>
+    <rect x="416" y="516" width="84" height="84" rx="22"/>
+    <rect x="416" y="624" width="84" height="84" rx="22"/>
+    <rect x="524" y="516" width="84" height="84" rx="22"/>
+    <rect x="524" y="624" width="84" height="84" rx="22"/>
+    <rect x="632" y="624" width="84" height="84" rx="22"/>
+  </g>
+  <!-- caps: the topmost lit cell of each column, lighter. Column six is
+       one cell tall, so its only cell is its cap. -->
+  <g fill="url(#cap)">
+    <rect x="200" y="516" width="84" height="84" rx="22"/>
+    <rect x="308" y="408" width="84" height="84" rx="22"/>
+    <rect x="416" y="300" width="84" height="84" rx="22"/>
+    <rect x="524" y="408" width="84" height="84" rx="22"/>
+    <rect x="632" y="516" width="84" height="84" rx="22"/>
+    <rect x="740" y="624" width="84" height="84" rx="22"/>
+  </g>
+</svg>
