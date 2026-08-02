@@ -23,6 +23,9 @@ jobs:
       # tsc (strict, includes the Effect coordinator) + vite build, which
       # also produces dist/ so tauri's context macro is satisfied.
       - run: npm run build
+      # The normalize pass: every rule proven by its friction entry's
+      # literal example (docs/friction.md).
+      - run: npm test
 
       - uses: dtolnay/rust-toolchain@stable
       # Caches ~/.cargo and target/ keyed on Cargo.lock — the difference

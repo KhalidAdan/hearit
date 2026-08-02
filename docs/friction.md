@@ -6,6 +6,11 @@ when a cluster forms, not per-entry.
 
 Format: date noticed · what happened · suspected stage · fix shape.
 
+**Entries 1–6: FIXED in v0.2.2** by the normalize pass
+([src/normalize.ts](../src/normalize.ts)) — ordered rules, run on the
+whole grabbed text before the sentence splitter, each rule citing its
+entry here, each entry's literal example a test in normalize.test.ts.
+
 ---
 
 ## 1. Currency reads backwards

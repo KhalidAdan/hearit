@@ -12,6 +12,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Data, Duration, Effect, Ref } from "effect";
+import { normalize } from "./normalize";
 
 type State = "idle" | "speaking";
 
@@ -152,7 +153,10 @@ const onPressed = (stampMs: number) =>
     yield* Ref.set(stateRef, "speaking");
     yield* Ref.set(feedingRef, true);
 
-    const sentences = splitSentences(text);
+    // Normalize BEFORE splitting (friction #5: dotted abbreviations
+    // fracture the splitter), but AFTER the grammar check above — the
+    // toggle compares what you selected, never what we rewrote.
+    const sentences = splitSentences(normalize(text));
     yield* Ref.set(takeRef, {
       pressMs: t0,
       grabMs: grab.totalMs,
