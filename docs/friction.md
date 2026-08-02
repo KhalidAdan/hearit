@@ -52,3 +52,19 @@ Format: date noticed · what happened · suspected stage · fix shape.
   becomes " point " ("3.5" → "3 point 5", "0.1.2" → "0 point 1 point
   2") before number expansion. Uniform, explainable, no float-parsing.
 - **Status:** logged. The cluster now has a unifying rule candidate.
+
+## 4. Dashes are ignored
+
+- **2026-08-01** — `On July 30–31, 2026` spoken as "On July 30. 31,
+  2026." The en dash vanishes, so the range reads as two disconnected
+  numbers. Em dashes in prose presumably vanish the same way, which
+  silently glues clauses together that the author deliberately held
+  apart.
+- **Stage:** sidecar normalization drops – and — instead of voicing or
+  pausing them.
+- **Fix shape:** two rules in the pass: (a) dash flanked by digits
+  becomes " to " ("30–31" → "30 to 31", "2019–2023" → "2019 to 2023",
+  composes with #1 for "$5–10M"); (b) prose em/en dash becomes a comma —
+  not spoken, but breathed, which is what a dash is for.
+- **Status:** logged. Shapes so far: currency reorder (#1), digit-dot
+  (#2/#3), digit-dash ranges + prose dashes (#4).
