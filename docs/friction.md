@@ -39,3 +39,16 @@ Format: date noticed · what happened · suspected stage · fix shape.
   `\d+\.\d+` → "N point D-digits" ("3.5" → "three point five", "3.14" →
   "three point one four") before the sidecar sees it.
 - **Status:** logged, clustering with #1.
+
+## 3. Version numbers lose their dots
+
+- **2026-08-01** — `v0.1.2` spoken as "V. zero. one. two." Correct:
+  "vee zero point one point two". Same root as #2 seen from the other
+  side: dots between digits vanish instead of becoming "point". Version
+  strings can't hide behind a decimal-number rule (0.1.2 is not a
+  float), so the pass needs the general form, not the special case.
+- **Stage:** same as #1/#2 — sidecar number normalization.
+- **Fix shape:** one rule covers #2 AND #3: any `.` flanked by digits
+  becomes " point " ("3.5" → "3 point 5", "0.1.2" → "0 point 1 point
+  2") before number expansion. Uniform, explainable, no float-parsing.
+- **Status:** logged. The cluster now has a unifying rule candidate.
