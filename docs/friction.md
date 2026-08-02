@@ -68,3 +68,22 @@ Format: date noticed · what happened · suspected stage · fix shape.
   not spoken, but breathed, which is what a dash is for.
 - **Status:** logged. Shapes so far: currency reorder (#1), digit-dot
   (#2/#3), digit-dash ranges + prose dashes (#4).
+
+## 5. Dotted initialisms read as sentence ends
+
+- **2026-08-01** — `U.S. President Donald Trump` spoken as "U. (pause)
+  S. President…". The periods inside the initialism are treated as
+  sentence boundaries.
+- **Stage:** BOTH sides, and one of them is ours. hearit's own sentence
+  splitter (main.ts) cuts on every `.`, so "U.S." mid-sentence can
+  fracture one sentence into multiple synth requests — an inter-request
+  pause plus sentence-final intonation on "U." That pause is likely
+  ours, not espeak's. The <24-char merge hides some cases, not all.
+- **Fix shape:** rewrite dotted initialisms BEFORE the splitter ever
+  sees them: `([A-Z]\.){2,}` → the bare letters spaced ("U.S." → "U S",
+  "e.g."/"Ph.D." handled by a small known-abbreviation list). One fix
+  location (the normalize pass, which therefore must run before
+  splitting, in TS or invoked ahead of it) cures the splitter fracture
+  and the espeak pause at once. Ordering fact #2 for the pass: it runs
+  pre-split, not per-sentence.
+- **Status:** logged. First entry implicating hearit's own code.
