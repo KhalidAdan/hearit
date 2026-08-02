@@ -18,11 +18,13 @@ one time each:
 
 1. **The app** — run `hearit_x.y.z_x64-setup.exe`. Updates after that are
    automatic and tiny.
-2. **The voice** — download `hearit-sidecar-cuda-win64.zip` (~1.7GB, once)
-   and extract it so `sidecar\` sits next to `hearit.exe`. Needs an
-   NVIDIA GPU; no GPU, rename the bundled `koko-cpu.exe` over `koko.exe`
-   (works, slower). The app and the voice update on separate cadences on
-   purpose — see docs/sidecar.md.
+2. **The voice** — download
+   [hearit-sidecar-cuda-win64.zip](https://github.com/KhalidAdan/hearit/releases/download/sidecar-v1/hearit-sidecar-cuda-win64.zip)
+   (~1.7GB, once) and extract it so `sidecar\` sits next to `hearit.exe`.
+   Needs an NVIDIA GPU; no GPU, rename the bundled `koko-cpu.exe` over
+   `koko.exe` (works, slower). The app and the voice live in separate
+   releases on purpose: the app updates weekly and silently, the voice is
+   bought once — see docs/sidecar.md.
 
 Then: select text anywhere, press **F10**. Press again on nothing to
 stop; the pill's ✕ also stops; a new selection wins instantly.
