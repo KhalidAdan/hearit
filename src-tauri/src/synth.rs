@@ -33,7 +33,7 @@ fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(reqwest::Client::new)
 }
 
-async fn synth_once(text: &str) -> Result<(Vec<f32>, u64, u64), String> {
+async fn synth_once(text: &str, speed: f32) -> Result<(Vec<f32>, u64, u64), String> {
     let t = Instant::now();
     let resp = client()
         .post(format!(
@@ -44,7 +44,7 @@ async fn synth_once(text: &str) -> Result<(Vec<f32>, u64, u64), String> {
             "input": text,
             "voice": VOICE,
             "response_format": "pcm",
-            "speed": 1.0,
+            "speed": speed,
         }))
         .send()
         .await
@@ -73,13 +73,14 @@ async fn synth_once(text: &str) -> Result<(Vec<f32>, u64, u64), String> {
 /// the engine's warmup, wait for warmth instead of failing the take.
 pub async fn synth_waiting(
     text: &str,
+    speed: f32,
     patience: Duration,
 ) -> Result<(Vec<f32>, SynthTiming), String> {
     let start = Instant::now();
     let mut attempts = 0u32;
     loop {
         attempts += 1;
-        match synth_once(text).await {
+        match synth_once(text, speed).await {
             Ok((samples, http_ms, decode_ms)) => {
                 return Ok((
                     samples,
@@ -103,5 +104,5 @@ pub async fn synth_waiting(
 /// Warmup probe for sidecar.rs: success means "warm and listening". The
 /// audio is discarded — this is a knock on the door, not a take.
 pub async fn probe() -> Result<(), String> {
-    synth_once("Ready.").await.map(|_| ())
+    synth_once("Ready.", 1.0).await.map(|_| ())
 }

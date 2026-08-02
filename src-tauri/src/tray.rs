@@ -1,21 +1,59 @@
-//! The tray: hearit's only permanent visible presence, and deliberately
-//! thin. This is v2's "startup residence and a tray icon" arriving early
-//! because one need was earned in real use: freeing the GPU without
-//! killing the key, and killing the key without hunting a process. Two
-//! items. No status line, no settings — those wait for their own
-//! friction-list entries.
+//! The tray: hearit's only permanent visible presence. v2's switches
+//! live here now — listening speed (adjusted live, remembered forever)
+//! and startup residence — plus the originals: free the GPU, quit. Still
+//! no settings screen; these are the key's physical switches, not a
+//! config. Speed takes effect from the next sentence, which for a
+//! sentence-streamed reader is what "live" honestly means.
 
 use std::sync::Mutex;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{AppHandle, Manager, Wry};
+use tauri_plugin_autostart::ManagerExt;
+
+use crate::{settings, Speed};
+
+/// The shelf of speeds. Kokoro accepts a continuous value; a menu wants
+/// steps. These cover "careful read" to "double time" — change the list,
+/// nothing else knows.
+const SPEEDS: [f32; 6] = [0.8, 1.0, 1.25, 1.5, 1.75, 2.0];
 
 /// The icon handle must outlive build() — a dropped TrayIcon disappears
 /// from the tray. Managed state is the app-lifetime shelf for it.
 #[derive(Default)]
 pub struct Tray(pub Mutex<Option<TrayIcon<Wry>>>);
 
-pub fn build(app: &AppHandle) -> tauri::Result<()> {
+pub fn build(app: &AppHandle, saved_speed: f32) -> tauri::Result<()> {
+    // Speed picker, persisted choice pre-checked.
+    let mut speed_items: Vec<CheckMenuItem<Wry>> = Vec::new();
+    for s in SPEEDS {
+        speed_items.push(CheckMenuItem::with_id(
+            app,
+            format!("speed:{s}"),
+            format!("{s}×"),
+            true,
+            (s - saved_speed).abs() < 0.01,
+            None::<&str>,
+        )?);
+    }
+    let speed_refs: Vec<&dyn IsMenuItem<Wry>> =
+        speed_items.iter().map(|i| i as &dyn IsMenuItem<Wry>).collect();
+    let speeds = Submenu::with_id_and_items(app, "speeds", "Speed", true, &speed_refs)?;
+
+    // Autostart only makes sense for the built app: enabling it from a
+    // dev run would register the debug exe, which needs the vite server
+    // to be useful. The toggle works either way; the caveat lives here
+    // as a comment and in the docs. (sayit's caveat, same words.)
+    let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
+    let autostart = CheckMenuItem::with_id(
+        app,
+        "autostart",
+        "Start with Windows",
+        true,
+        autostart_on,
+        None::<&str>,
+    )?;
+
     let free = MenuItem::with_id(
         app,
         "free-vram",
@@ -24,7 +62,17 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(app, "quit", "Quit hearit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&free, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &speeds,
+            &autostart,
+            &PredefinedMenuItem::separator(app)?,
+            &free,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )?;
 
     let tray = TrayIconBuilder::with_id("hearit")
         .icon(
@@ -35,11 +83,37 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .tooltip("hearit — select text, press F10")
         .menu(&menu)
         .show_menu_on_left_click(true)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            // RunEvent::Exit kills the sidecar on the way out.
-            "quit" => app.exit(0),
-            "free-vram" => crate::sidecar::sleep(app),
-            _ => {}
+        .on_menu_event(move |app, event| {
+            let id = event.id().as_ref();
+            if id == "quit" {
+                // RunEvent::Exit kills the sidecar on the way out.
+                app.exit(0);
+            } else if id == "free-vram" {
+                crate::sidecar::sleep(app);
+            } else if id == "autostart" {
+                let launcher = app.autolaunch();
+                let flip = match launcher.is_enabled() {
+                    Ok(true) => launcher.disable(),
+                    _ => launcher.enable(),
+                };
+                if let Err(e) = flip {
+                    eprintln!("[hearit] autostart toggle failed: {e}");
+                }
+                let _ = autostart.set_checked(launcher.is_enabled().unwrap_or(false));
+            } else if let Some(s) = id.strip_prefix("speed:") {
+                let Ok(speed) = s.parse::<f32>() else { return };
+                println!("[hearit] speed: {speed}×");
+                // Live: the next sentence synthesizes at this speed.
+                *app.state::<Speed>().0.lock().unwrap() = speed;
+                for item in &speed_items {
+                    let _ = item.set_checked(item.id().as_ref() == id);
+                }
+                // Remembered forever: load-and-mutate so future fields
+                // survive the write (sayit's dictionary lesson).
+                let mut saved = settings::load(app);
+                saved.speed = speed;
+                settings::save(app, &saved);
+            }
         })
         .build(app)?;
 

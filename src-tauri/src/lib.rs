@@ -9,6 +9,7 @@
 mod grab;
 mod hotkey;
 mod paths;
+mod settings;
 mod sidecar;
 mod speak;
 mod synth;
@@ -27,6 +28,10 @@ use tauri::{Emitter, Manager};
 /// audio comes back, matches a dead token, and lands on the floor.
 #[derive(Default)]
 pub struct Takes(pub AtomicU64);
+
+/// The tray's speed pick, applied to every synthesis request. A Mutex
+/// around an f32 is heavier than an atomic, but it reads as what it is.
+pub struct Speed(pub Mutex<f32>);
 
 #[tauri::command]
 async fn grab_selection() -> Result<grab::Grab, String> {
@@ -68,13 +73,15 @@ async fn speak_sentence(
     app: tauri::AppHandle,
     speaker: tauri::State<'_, speak::Speaker>,
     takes: tauri::State<'_, Takes>,
+    speed: tauri::State<'_, Speed>,
     text: String,
     take: u64,
 ) -> Result<Spoken, String> {
+    let speed = *speed.0.lock().unwrap();
     // Patient: if this take raced the engine's warmup, wait for warmth.
     // 30s covers a cold first-ever start; real presses cost milliseconds.
     let (samples, t) =
-        synth::synth_waiting(&text, std::time::Duration::from_secs(30)).await?;
+        synth::synth_waiting(&text, speed, std::time::Duration::from_secs(30)).await?;
     let audio_ms = samples.len() as u64 * 1000 / synth::SAMPLE_RATE as u64;
 
     let queued = takes.0.load(Ordering::SeqCst) == take;
@@ -234,16 +241,23 @@ pub fn run() {
                 .with_handler(|app, _shortcut, event| hotkey::on_shortcut(app, event.state()))
                 .build(),
         )
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(sidecar::Sidecar(Mutex::default()))
         .manage(sidecar::Ready::default())
         .manage(Takes::default())
+        .manage(Speed(Mutex::new(1.0)))
         .manage(tray::Tray::default())
         .setup(|app| {
             // The speaker is managed here, not before setup, because its
             // FFT monitor needs an AppHandle to emit viz_heights.
             app.manage(speak::start(app.handle())?);
-            tray::build(app.handle())?;
+            let saved = settings::load(app.handle());
+            *app.state::<Speed>().0.lock().unwrap() = saved.speed;
+            tray::build(app.handle(), saved.speed)?;
             // The update check runs BEFORE the sidecar: a broken sidecar
             // must never be able to block the update that fixes it.
             tauri::async_runtime::spawn(update::check_and_install(app.handle().clone()));
