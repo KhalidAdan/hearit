@@ -46,3 +46,11 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     app.state::<Tray>().0.lock().unwrap().replace(tray);
     Ok(())
 }
+
+/// The tray tooltip is the app's only voice when something's wrong at
+/// boot — a release build has no console, and hearit has no window.
+pub fn set_tooltip(app: &AppHandle, text: &str) {
+    if let Some(tray) = app.state::<Tray>().0.lock().unwrap().as_ref() {
+        let _ = tray.set_tooltip(Some(text));
+    }
+}

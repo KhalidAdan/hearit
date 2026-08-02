@@ -244,8 +244,18 @@ pub fn run() {
             // FFT monitor needs an AppHandle to emit viz_heights.
             app.manage(speak::start(app.handle())?);
             tray::build(app.handle())?;
-            sidecar::start(app.handle())?;
+            // The update check runs BEFORE the sidecar: a broken sidecar
+            // must never be able to block the update that fixes it.
             tauri::async_runtime::spawn(update::check_and_install(app.handle().clone()));
+            // A missing sidecar is a visible condition, not a boot
+            // failure. The lesson of v0.1.0: installed away from its
+            // companions, it died at setup with no console to say why.
+            // Now the app lives in the tray either way and the tooltip
+            // explains; the next press retries via engine_start.
+            if let Err(e) = sidecar::start(app.handle()) {
+                eprintln!("[hearit] {e}");
+                tray::set_tooltip(app.handle(), &format!("hearit — {e}"));
+            }
             println!("[hearit] speak key on {}", hotkey::SPEAK_KEY);
             Ok(())
         })

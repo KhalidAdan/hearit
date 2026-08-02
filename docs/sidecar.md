@@ -52,6 +52,19 @@ sidecar\
   data\voices-v1.0.bin              (HEARIT_VOICES overrides)
 ```
 
+An installed hearit (e.g. `E:\hearit\`) can share the repo's sidecar
+without copying 2GB — a junction costs nothing and needs no admin:
+
+```
+New-Item -ItemType Junction -Path E:\hearit\sidecar -Target E:\CODE\hearit\sidecar
+```
+
+If the sidecar can't be found, hearit still boots: the tray tooltip says
+so, and the next press retries. (It didn't always — installed v0.1.0
+died silently at setup. The update check now runs before the sidecar
+start for the same reason: a broken sidecar must never block the update
+that fixes it.)
+
 Model sources (what `download_all.sh` in the kokoros repo uses):
 
 - model: `https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX-timestamped/resolve/main/onnx/model.onnx` (~310MB)
