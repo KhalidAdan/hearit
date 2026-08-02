@@ -11,12 +11,21 @@ types); hearit is the key that speaks (you point, it reads).
 - [docs/architecture.md](docs/architecture.md) — how it sits in the machine
 - [docs/sidecar.md](docs/sidecar.md) — the Kokoro voice engine and how to fetch it
 
-## Status
+## Install
 
-v1 scaffold. The pipeline (hotkey → grab → synthesize → play), the
-dot-matrix pill, and the dead-air instrumentation are written; the
-Kokoro sidecar binary and model must be fetched per docs/sidecar.md
-before the key makes sound.
+Two downloads from [Releases](https://github.com/KhalidAdan/hearit/releases),
+one time each:
+
+1. **The app** — run `hearit_x.y.z_x64-setup.exe`. Updates after that are
+   automatic and tiny.
+2. **The voice** — download `hearit-sidecar-cuda-win64.zip` (~1.7GB, once)
+   and extract it so `sidecar\` sits next to `hearit.exe`. Needs an
+   NVIDIA GPU; no GPU, rename the bundled `koko-cpu.exe` over `koko.exe`
+   (works, slower). The app and the voice update on separate cadences on
+   purpose — see docs/sidecar.md.
+
+Then: select text anywhere, press **F10**. Press again on nothing to
+stop; the pill's ✕ also stops; a new selection wins instantly.
 
 ## Dev
 
@@ -25,8 +34,5 @@ npm install
 npm run tauri dev
 ```
 
-Select text anywhere, press F10. Press again on nothing to stop; the
-pill's ✕ also stops. Dead air per take is logged to the console and to
-`dead-air-log.csv` in the app config dir.
-
-Icons are currently sayit's, borrowed as placeholders.
+Dead air per take is logged to the console and to `dead-air-log.csv` in
+the app config dir — that file is the project's conscience.

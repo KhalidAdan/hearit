@@ -24,3 +24,6 @@ dist-ssr
 # hearit: large local binaries (see docs/sidecar.md for how to fetch)
 models/
 sidecar/
+
+# release-asset bundles, built locally
+hearit-sidecar-*.zip
