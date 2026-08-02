@@ -1,0 +1,50 @@
+# The release machine, sayit's verbatim: push a version tag (v0.2.0, ...)
+# and GitHub builds hearit, signs the updater artifacts, and publishes a
+# real Release with installers + latest.json. Running apps see it at next
+# boot (update.rs), stage it silently, and apply it on their next launch.
+#
+# Requires two repo secrets (one-time setup):
+#   TAURI_SIGNING_PRIVATE_KEY           (contents of ~/.tauri/hearit.key)
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  (contents of ~/.tauri/hearit-key-password.txt)
+#
+# Companions (sidecar/ with koko.exe, CUDA DLLs, and the model) are NOT in
+# the installer — the exe finds them at runtime (paths.rs): next to the
+# exe or anywhere up-tree of it. docs/sidecar.md is the recipe.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "hearit ${{ github.ref_name }}"
+          releaseBody: "Select it. Press the key. Hear it. First install: see docs/sidecar.md for the Kokoro sidecar setup. Updates after that are automatic."
+          releaseDraft: false
+          prerelease: false

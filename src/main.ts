@@ -270,6 +270,11 @@ void listen("pill_stop", () => void Effect.runPromise(stopSpeaking));
 void listen("sidecar_ready", () =>
   console.log("[hearit] engine warm — the key is live"),
 );
+// An update was downloaded and staged (update.rs); it applies on next
+// launch. No tray yet to note it in, so the console is the ledger.
+void listen<string>("update_installed", (e) =>
+  console.log(`[hearit] v${e.payload} staged — takes effect next launch`),
+);
 void listen("pipeline_error", (e) =>
   console.error("[hearit] pipeline error:", e.payload),
 );

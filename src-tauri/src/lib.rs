@@ -12,6 +12,7 @@ mod paths;
 mod sidecar;
 mod speak;
 mod synth;
+mod update;
 
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -232,6 +233,7 @@ pub fn run() {
                 .with_handler(|app, _shortcut, event| hotkey::on_shortcut(app, event.state()))
                 .build(),
         )
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(sidecar::Sidecar(Mutex::default()))
         .manage(sidecar::Ready::default())
         .manage(Takes::default())
@@ -240,6 +242,7 @@ pub fn run() {
             // FFT monitor needs an AppHandle to emit viz_heights.
             app.manage(speak::start(app.handle())?);
             sidecar::start(app.handle())?;
+            tauri::async_runtime::spawn(update::check_and_install(app.handle().clone()));
             println!("[hearit] speak key on {}", hotkey::SPEAK_KEY);
             Ok(())
         })
