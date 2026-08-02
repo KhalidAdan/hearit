@@ -80,7 +80,10 @@ pub fn build(app: &AppHandle, saved_speed: f32) -> tauri::Result<()> {
                 .expect("bundle always has an icon")
                 .clone(),
         )
-        .tooltip("hearit — select text, press F10")
+        .tooltip(format!(
+            "hearit v{} — select text, press F10",
+            app.package_info().version
+        ))
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(move |app, event| {

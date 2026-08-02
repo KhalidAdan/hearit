@@ -275,10 +275,10 @@ void listen("pill_stop", () => void Effect.runPromise(stopSpeaking));
 void listen("sidecar_ready", () =>
   console.log("[hearit] engine warm — the key is live"),
 );
-// An update was downloaded and staged (update.rs); it applies on next
-// launch. The console is the ledger.
+// An update was downloaded (update.rs); it installs when the app quits
+// and runs from the launch after. The console is the ledger.
 void listen<string>("update_installed", (e) =>
-  console.log(`[hearit] v${e.payload} staged — takes effect next launch`),
+  console.log(`[hearit] v${e.payload} downloaded — installs on quit`),
 );
 void listen("engine_sleeping", () =>
   console.log("[hearit] engine asleep — next press wakes it"),

@@ -251,6 +251,7 @@ pub fn run() {
         .manage(Takes::default())
         .manage(Speed(Mutex::new(1.0)))
         .manage(tray::Tray::default())
+        .manage(update::Staged::default())
         .setup(|app| {
             // The speaker is managed here, not before setup, because its
             // FFT monitor needs an AppHandle to emit viz_heights.
@@ -260,7 +261,7 @@ pub fn run() {
             tray::build(app.handle(), saved.speed)?;
             // The update check runs BEFORE the sidecar: a broken sidecar
             // must never be able to block the update that fixes it.
-            tauri::async_runtime::spawn(update::check_and_install(app.handle().clone()));
+            tauri::async_runtime::spawn(update::check_and_stage(app.handle().clone()));
             // A missing sidecar is a visible condition, not a boot
             // failure. The lesson of v0.1.0: installed away from its
             // companions, it died at setup with no console to say why.
@@ -287,12 +288,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error building hearit")
         .run(|app, event| {
-            // The sidecar is our child; if we exit and leave it running,
-            // it squats on the port forever.
             if let tauri::RunEvent::Exit = event {
+                // The sidecar is our child; if we exit and leave it
+                // running, it squats on the port forever.
                 if let Some(mut child) = app.state::<sidecar::Sidecar>().0.lock().unwrap().take() {
                     let _ = child.kill();
                 }
+                // Any downloaded update applies now, while we're already
+                // going down — never mid-session.
+                update::install_if_staged(app);
             }
         });
 }
