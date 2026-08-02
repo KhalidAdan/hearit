@@ -25,3 +25,17 @@ Format: date noticed · what happened · suspected stage · fix shape.
   PR to kokoros normalize.rs, but hearit shouldn't depend on it.)
 - **Status:** logged, waiting for the cluster ("decent amount of errors
   like this" — collect the other shapes before designing the pass).
+
+## 2. Decimals lose their point
+
+- **2026-08-01** — `3.5%` spoken as "three five percent". Correct:
+  "three point five percent". The decimal point is being dropped or
+  treated as a separator, so the digits read as a list. Likely
+  independent of the `%` (test: bare `3.5` in prose) — if so, this hits
+  every decimal in every article, which makes it the highest-frequency
+  entry so far.
+- **Stage:** same as #1 — sidecar text normalization (number expansion).
+- **Fix shape:** same normalize pass as #1 — decimals rule:
+  `\d+\.\d+` → "N point D-digits" ("3.5" → "three point five", "3.14" →
+  "three point one four") before the sidecar sees it.
+- **Status:** logged, clustering with #1.
