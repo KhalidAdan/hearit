@@ -126,3 +126,34 @@ sentence), or `stream:true` (server-side ~10-word windows, chunked PCM).
 first success, then declares `sidecar_ready`. ONNX session creation and
 first-inference costs are paid there, at boot, so the first real press of
 the day speaks as fast as the hundredth.
+
+## The engine has a metabolism (sayit's, ported)
+
+After `idle_minutes` of idle (settings.json, default 5, 0 = never) the
+coordinator kills koko, freeing ~2GB of working set — the CUDA runtime
+is most of it. A press from sleep still works instantly on the grammar
+side (grab needs no engine) while `engine_start` wakes it and
+`synth_waiting`'s patience absorbs the warmup (seconds). The tray's
+"Free VRAM" is the manual version of the same path. The key always
+works; the user manages nothing.
+
+## The engine cannot outlive hearit (added 2026-08-02)
+
+Ported from sayit the day idle sidecars starved a nightly Ollama job
+into 5-minute timeouts (WDDM paged the VRAM overflow to system RAM;
+prompt processing fell ~250×, invisibly). Three layers:
+
+- every spawned koko is assigned to a Windows **job object** with
+  `KILL_ON_JOB_CLOSE` — if hearit dies for ANY reason (crash, Task
+  Manager, dev-run teardown), the OS kills the engine with it;
+- at boot, hearit **reaps stale** koko processes whose image path
+  matches its own resolved sidecar exe (orphans from pre-job-object
+  builds). sayit's whisper-server proved a stale sidecar can bind its
+  port alongside a fresh one instead of failing, so nothing visibly
+  breaks — both just squat VRAM;
+- a named mutex makes hearit **single-instance**, so two app launches
+  (installed autostart + a dev run) can't spawn two engines.
+
+Verify: leave hearit idle past `idle_minutes`, then
+`nvidia-smi --query-gpu=memory.used --format=csv` — hearit should
+contribute ~0 MiB (and `tasklist | findstr koko` nothing).

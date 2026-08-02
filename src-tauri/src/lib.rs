@@ -133,6 +133,21 @@ fn engine_start(app: tauri::AppHandle) -> Result<(), String> {
     sidecar::start(&app)
 }
 
+/// The coordinator's idle timer lands here: kill the engine, free the
+/// VRAM. Same path as the tray's "Free VRAM"; the next press wakes it.
+#[tauri::command]
+fn engine_sleep(app: tauri::AppHandle) {
+    sidecar::sleep(&app);
+}
+
+/// How long the engine may idle before it sleeps (settings.json
+/// `idle_minutes`, default 5, 0 = never). Pulled by the coordinator at
+/// boot.
+#[tauri::command]
+fn get_idle_minutes(app: tauri::AppHandle) -> u64 {
+    settings::load(&app).idle_minutes
+}
+
 /// One take's dead-air breakdown, assembled by the coordinator (the only
 /// place all three clocks meet: key stamp, Rust stage timings, playback
 /// stamp). All milliseconds.
@@ -232,7 +247,25 @@ fn pill_hide(app: tauri::AppHandle) {
     }
 }
 
+/// One hearit per machine. Two instances means two engines fighting over
+/// one hotkey, one port, and — the expensive part — double the VRAM.
+/// A named mutex is the classic Windows answer; the handle is deliberately
+/// leaked so the claim lasts exactly as long as the process.
+fn already_running() -> bool {
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    let name: Vec<u16> = "Local\\hearit-single-instance\0".encode_utf16().collect();
+    unsafe {
+        let handle = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
+        !handle.is_null() && GetLastError() == ERROR_ALREADY_EXISTS
+    }
+}
+
 pub fn run() {
+    if already_running() {
+        eprintln!("[hearit] another hearit is already running — not starting a second engine");
+        return;
+    }
     tauri::Builder::default()
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -267,6 +300,10 @@ pub fn run() {
             // companions, it died at setup with no console to say why.
             // Now the app lives in the tray either way and the tooltip
             // explains; the next press retries via engine_start.
+            // But first: a previous hearit that died uncleanly may have
+            // left its engine behind, still holding VRAM and port 8880.
+            // Clear it before spawning ours, or we'd run two.
+            sidecar::reap_stale();
             if let Err(e) = sidecar::start(app.handle()) {
                 eprintln!("[hearit] {e}");
                 tray::set_tooltip(app.handle(), &format!("hearit — {e}"));
@@ -281,6 +318,8 @@ pub fn run() {
             speak_stop,
             is_ready,
             engine_start,
+            engine_sleep,
+            get_idle_minutes,
             log_gap,
             pill_show,
             pill_hide
@@ -290,9 +329,12 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 // The sidecar is our child; if we exit and leave it
-                // running, it squats on the port forever.
+                // running, it squats on the port and ~2GB forever. The
+                // job object (sidecar.rs) would catch it anyway — this is
+                // just the polite version that doesn't wait for the OS.
                 if let Some(mut child) = app.state::<sidecar::Sidecar>().0.lock().unwrap().take() {
                     let _ = child.kill();
+                    let _ = child.wait();
                 }
                 // Any downloaded update applies now, while we're already
                 // going down — never mid-session.

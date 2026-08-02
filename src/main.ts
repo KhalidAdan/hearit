@@ -4,6 +4,11 @@
 // selection while speaking → stop; a new selection → the new one wins,
 // instantly, no queue, no modes.
 //
+// It also runs the engine's metabolism (sayit's, ported): awake while you
+// listen, asleep after a few idle minutes (settings.json idle_minutes,
+// default 5), woken by the key itself. ~2GB comes home while it sleeps.
+// The user never manages any of it. The key always works.
+//
 // Reading guide (same as sayit's):
 // - An Effect is a *description* — nothing runs until Effect.runPromise.
 // - Effect.gen + yield* reads like async/await with typed errors.
@@ -11,7 +16,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Data, Duration, Effect, Ref } from "effect";
+import { Data, Duration, Effect, Fiber, Ref } from "effect";
 import { normalize } from "./normalize";
 
 type State = "idle" | "speaking";
@@ -78,6 +83,48 @@ const genRef = Ref.unsafeMake(0);
 const feedingRef = Ref.unsafeMake(false);
 const takeRef = Ref.unsafeMake<TakeLog | null>(null);
 
+// ---- the engine's metabolism ------------------------------------------
+
+// Mirrored from Rust events (engine_waking / sidecar_ready /
+// engine_sleeping) so the sleep timer only ever targets a warm engine.
+type Engine = "waking" | "ready" | "asleep";
+const engineRef = Ref.unsafeMake<Engine>("waking");
+// After this many idle minutes, the engine sleeps and ~2GB comes home.
+// Pulled from settings.json (`idle_minutes`, default 5) at boot; 0
+// disables the timer.
+const idleMinutesRef = Ref.unsafeMake(5);
+const sleepTimerRef = Ref.unsafeMake<Fiber.RuntimeFiber<void, never> | null>(
+  null,
+);
+
+const cancelSleepTimer = Effect.gen(function* () {
+  const fiber = yield* Ref.get(sleepTimerRef);
+  // interruptFork, not interrupt: never WAIT for the timer to die — sayit
+  // once had a press sit behind an uninterruptible idle sleep this way.
+  if (fiber) yield* Fiber.interruptFork(fiber);
+  yield* Ref.set(sleepTimerRef, null);
+});
+
+// Armed on every return to idle; interrupted by the next press. If it
+// ever fires, the engine sleeps — invisibly; the next press wakes it and
+// synth_waiting absorbs the warmup.
+const armSleepTimer = Effect.gen(function* () {
+  yield* cancelSleepTimer;
+  const idleMinutes = yield* Ref.get(idleMinutesRef);
+  const engine = yield* Ref.get(engineRef);
+  const state = yield* Ref.get(stateRef);
+  if (idleMinutes <= 0 || engine !== "ready" || state !== "idle") return;
+  // Effect.interruptible is load-bearing (sayit's lesson): a forked fiber
+  // can inherit an uninterruptible region, and then cancellation waits
+  // out the full idle window instead of stopping the timer now.
+  const fiber = yield* Effect.sleep(Duration.minutes(idleMinutes)).pipe(
+    Effect.zipRight(cmd("engine_sleep").pipe(Effect.ignore)),
+    Effect.interruptible,
+    Effect.forkDaemon,
+  );
+  yield* Ref.set(sleepTimerRef, fiber);
+});
+
 // ---- the sentence splitter -------------------------------------------
 
 // The streaming unit is the sentence: Kokoro's latency scales with input
@@ -122,6 +169,7 @@ const stopSpeaking = Effect.gen(function* () {
   yield* Ref.set(currentTextRef, null);
   yield* Ref.set(stateRef, "idle");
   yield* pill(false);
+  yield* armSleepTimer;
 });
 
 // ---- the pipeline -----------------------------------------------------
@@ -139,9 +187,11 @@ const onPressed = (stampMs: number) =>
       return yield* stopSpeaking;
     }
 
-    // The engine may be asleep (tray: free VRAM). Waking is idempotent —
-    // one cheap IPC when it's already up — and synth_waiting's patience
-    // absorbs the warmup when it isn't.
+    // The engine may be asleep (idle timer, or tray: free VRAM). Waking
+    // is idempotent — one cheap IPC when it's already up — and
+    // synth_waiting's patience absorbs the warmup when it isn't. A
+    // pending sleep must not fire mid-take.
+    yield* cancelSleepTimer;
     yield* cmd("engine_start").pipe(Effect.ignore);
 
     // New selection wins: speak_begin stops the old voice inside Rust and
@@ -268,6 +318,7 @@ void listen("playback_done", () =>
       yield* Ref.set(currentTextRef, null);
       yield* Ref.set(stateRef, "idle");
       yield* pill(false);
+      yield* armSleepTimer;
     }),
   ),
 );
@@ -277,7 +328,20 @@ void listen("playback_done", () =>
 void listen("pill_stop", () => void Effect.runPromise(stopSpeaking));
 
 void listen("sidecar_ready", () =>
-  console.log("[hearit] engine warm — the key is live"),
+  void Effect.runPromise(
+    Effect.gen(function* () {
+      yield* Ref.set(engineRef, "ready");
+      yield* Effect.sync(() =>
+        console.log("[hearit] engine warm — the key is live"),
+      );
+      // A warm engine nobody is using should still sleep on schedule
+      // (armSleepTimer skips itself if a take is mid-flight).
+      yield* armSleepTimer;
+    }),
+  ),
+);
+void listen("engine_waking", () =>
+  void Effect.runPromise(Ref.set(engineRef, "waking")),
 );
 // An update was downloaded (update.rs); it installs when the app quits
 // and runs from the launch after. The console is the ledger.
@@ -285,20 +349,32 @@ void listen<string>("update_installed", (e) =>
   console.log(`[hearit] v${e.payload} downloaded — installs on quit`),
 );
 void listen("engine_sleeping", () =>
-  console.log("[hearit] engine asleep — next press wakes it"),
+  void Effect.runPromise(
+    Effect.gen(function* () {
+      yield* Ref.set(engineRef, "asleep");
+      yield* cancelSleepTimer; // tray "Free VRAM" beat the timer to it
+      yield* Effect.sync(() =>
+        console.log("[hearit] engine asleep — next press wakes it"),
+      );
+    }),
+  ),
 );
 void listen("pipeline_error", (e) =>
   console.error("[hearit] pipeline error:", e.payload),
 );
 
 // Race-proofing, same as sayit: warmup may finish before this page's
-// listeners exist, so we PULL readiness once at startup too.
+// listeners exist, so we PULL readiness once at startup too. The idle
+// window rides along — one settings read at boot, not one per take.
 void Effect.runPromise(
   Effect.gen(function* () {
+    yield* Ref.set(idleMinutesRef, yield* cmd<number>("get_idle_minutes"));
     if (yield* cmd<boolean>("is_ready")) {
+      yield* Ref.set(engineRef, "ready");
       yield* Effect.sync(() =>
         console.log("[hearit] engine warm — the key is live"),
       );
+      yield* armSleepTimer;
     }
   }).pipe(Effect.ignore),
 );
