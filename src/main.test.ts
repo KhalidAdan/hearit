@@ -60,7 +60,7 @@ const boot = async (speakSentence: () => Promise<unknown>) => {
     return Promise.resolve(() => {});
   });
 
-  const logGap = vi.fn(() => Promise.resolve());
+  const logGap = vi.fn((_row?: Record<string, unknown>) => Promise.resolve());
   invoke.mockImplementation((name: string, args?: Record<string, unknown>) => {
     switch (name) {
       case "get_idle_minutes":
