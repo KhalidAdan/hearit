@@ -43,7 +43,10 @@ type Spoken = {
 
 // One take's dead-air ledger, assembled here because this is where all
 // three clocks meet: the OS key stamp, the Rust stage timings, and the
-// playback_started stamp from the audio thread.
+// playback_started stamp from the audio thread. The last two RACE: the
+// audio thread stamps mid-way through the first speak_sentence call, so
+// playback_started usually lands before that promise resolves. The row
+// flushes only once both are in (startedMs set, spokenSeen true).
 type TakeLog = {
   pressMs: number;
   grabMs: number;
@@ -52,6 +55,8 @@ type TakeLog = {
   engineWaitMs: number;
   firstSynthMs: number;
   firstAudioMs: number;
+  startedMs: number | null;
+  spokenSeen: boolean;
   logged: boolean;
 };
 
@@ -172,6 +177,48 @@ const stopSpeaking = Effect.gen(function* () {
   yield* armSleepTimer;
 });
 
+// ---- the dead-air ledger ----------------------------------------------
+
+// Called from both sides of the race — the playback_started handler and
+// the first-sentence Spoken result. Ref.modify claims the row atomically,
+// so whichever side arrives LAST writes it, exactly once, with the real
+// stage numbers instead of the zero placeholders.
+const flushTakeLog = Effect.gen(function* () {
+  const take = yield* Ref.modify(takeRef, (t) =>
+    !t || t.logged || t.startedMs === null || !t.spokenSeen
+      ? ([null, t] as const)
+      : ([t, { ...t, logged: true }] as const),
+  );
+  if (!take || take.startedMs === null) return;
+  // dead_air_ms is defined as playback_started stamp minus press stamp —
+  // unchanged; only WHEN we write it moved.
+  const deadAirMs = Math.max(0, take.startedMs - take.pressMs);
+  const plumbing = Math.max(
+    0,
+    deadAirMs - take.grabMs - take.engineWaitMs - take.firstSynthMs,
+  );
+  yield* Effect.sync(() =>
+    console.log(
+      [
+        `[dead-air] ━━ ${deadAirMs}ms from key to voice · ${take.chars} chars in ${take.sentences} sentence(s)`,
+        `[dead-air]   grab ${take.grabMs}ms · engine wait ${take.engineWaitMs}ms · first synth ${take.firstSynthMs}ms · plumbing ${plumbing}ms`,
+        `[dead-air]   (first sentence carries ${(take.firstAudioMs / 1000).toFixed(1)}s of audio)`,
+      ].join("\n"),
+    ),
+  );
+  yield* cmd("log_gap", {
+    row: {
+      deadAirMs,
+      chars: take.chars,
+      sentences: take.sentences,
+      grabMs: take.grabMs,
+      engineWaitMs: take.engineWaitMs,
+      firstSynthMs: take.firstSynthMs,
+      firstAudioMs: take.firstAudioMs,
+    },
+  }).pipe(Effect.ignore);
+});
+
 // ---- the pipeline -----------------------------------------------------
 
 const onPressed = (stampMs: number) =>
@@ -215,6 +262,8 @@ const onPressed = (stampMs: number) =>
       engineWaitMs: 0,
       firstSynthMs: 0,
       firstAudioMs: 0,
+      startedMs: null,
+      spokenSeen: false,
       logged: false,
     });
     yield* pill(true);
@@ -242,8 +291,10 @@ const onPressed = (stampMs: number) =>
               engineWaitMs: spoken.engineWaitMs,
               firstSynthMs: spoken.httpMs + spoken.decodeMs,
               firstAudioMs: spoken.audioMs,
+              spokenSeen: true,
             },
         );
+        yield* flushTakeLog;
       }
     }
     yield* Ref.set(feedingRef, false); // queue is fully fed; the sink drains
@@ -267,38 +318,18 @@ void listen<number>("speak_pressed", (e) => {
 });
 
 // The audio thread stamped the moment the sink went from empty to fed.
-// First time per take = the dead-air number the north star is judged by.
+// First time per take = the dead-air number the north star is judged by
+// (an underrun restart fires this again; startedMs keeps the first stamp).
+// Only stamp here — the row flushes once sentence 0's stages are in too.
 void listen<number>("playback_started", (e) =>
   void Effect.runPromise(
     Effect.gen(function* () {
-      const take = yield* Ref.get(takeRef);
-      if (!take || take.logged) return;
-      yield* Ref.update(takeRef, (t) => t && { ...t, logged: true });
-      const deadAirMs = Math.max(0, e.payload - take.pressMs);
-      const plumbing = Math.max(
-        0,
-        deadAirMs - take.grabMs - take.engineWaitMs - take.firstSynthMs,
+      yield* Ref.update(
+        takeRef,
+        (t) =>
+          t && (t.startedMs === null ? { ...t, startedMs: e.payload } : t),
       );
-      yield* Effect.sync(() =>
-        console.log(
-          [
-            `[dead-air] ━━ ${deadAirMs}ms from key to voice · ${take.chars} chars in ${take.sentences} sentence(s)`,
-            `[dead-air]   grab ${take.grabMs}ms · engine wait ${take.engineWaitMs}ms · first synth ${take.firstSynthMs}ms · plumbing ${plumbing}ms`,
-            `[dead-air]   (first sentence carries ${(take.firstAudioMs / 1000).toFixed(1)}s of audio)`,
-          ].join("\n"),
-        ),
-      );
-      yield* cmd("log_gap", {
-        row: {
-          deadAirMs,
-          chars: take.chars,
-          sentences: take.sentences,
-          grabMs: take.grabMs,
-          engineWaitMs: take.engineWaitMs,
-          firstSynthMs: take.firstSynthMs,
-          firstAudioMs: take.firstAudioMs,
-        },
-      }).pipe(Effect.ignore);
+      yield* flushTakeLog;
     }),
   ),
 );
