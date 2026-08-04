@@ -20,21 +20,21 @@ pub async fn check_and_stage(app: AppHandle) {
     let updater = match app.updater() {
         Ok(u) => u,
         Err(e) => {
-            eprintln!("[update] updater unavailable: {e}");
+            crate::diag::log(&app, &format!("[update] updater unavailable: {e}"));
             return;
         }
     };
     match updater.check().await {
         Ok(Some(update)) => {
             let version = update.version.clone();
-            println!("[update] v{version} available — downloading");
+            crate::diag::log(&app, &format!("[update] v{version} available — downloading"));
             match update.download(|_, _| {}, || {}).await {
                 Ok(bytes) => {
-                    println!("[update] v{version} downloaded — installs on quit");
+                    crate::diag::log(&app, &format!("[update] v{version} downloaded — installs on quit"));
                     let _ = app.emit("update_installed", version);
                     *app.state::<Staged>().0.lock().unwrap() = Some((update, bytes));
                 }
-                Err(e) => eprintln!("[update] download failed: {e}"),
+                Err(e) => crate::diag::log(&app, &format!("[update] download failed: {e}")),
             }
         }
         Ok(None) => println!("[update] up to date"),
@@ -46,9 +46,12 @@ pub async fn check_and_stage(app: AppHandle) {
 /// the installer's close-the-app requirement is satisfied for free.
 pub fn install_if_staged(app: &AppHandle) {
     if let Some((update, bytes)) = app.state::<Staged>().0.lock().unwrap().take() {
-        println!("[update] installing v{} on exit", update.version);
+        // Durable on purpose: in engine.log this line is the boundary
+        // between "the old instance" and "the installer-launched one" —
+        // the exact seam the 2026-08-04 wake failure lived behind.
+        crate::diag::log(app, &format!("[update] installing v{} on exit", update.version));
         if let Err(e) = update.install(bytes) {
-            eprintln!("[update] install failed: {e}");
+            crate::diag::log(app, &format!("[update] install failed: {e}"));
         }
     }
 }

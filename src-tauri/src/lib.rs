@@ -6,6 +6,7 @@
 //! that's where the OS is. Rust touches the OS, TS makes decisions, the
 //! sidecar thinks.
 
+mod diag;
 mod grab;
 mod hotkey;
 mod paths;
@@ -286,6 +287,20 @@ pub fn run() {
         .manage(tray::Tray::default())
         .manage(update::Staged::default())
         .setup(|app| {
+            // The first line of every boot, durably: version and exe path.
+            // When an installer-launched instance misbehaves (2026-08-04:
+            // one booted, slept, and couldn't wake its engine), engine.log
+            // shows which binary booted, when, and what the engine did next.
+            diag::log(
+                app.handle(),
+                &format!(
+                    "[hearit] boot — v{} from {}",
+                    app.package_info().version,
+                    std::env::current_exe()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| "?".into())
+                ),
+            );
             // The speaker is managed here, not before setup, because its
             // FFT monitor needs an AppHandle to emit viz_heights.
             app.manage(speak::start(app.handle())?);
@@ -298,16 +313,14 @@ pub fn run() {
             // A missing sidecar is a visible condition, not a boot
             // failure. The lesson of v0.1.0: installed away from its
             // companions, it died at setup with no console to say why.
-            // Now the app lives in the tray either way and the tooltip
-            // explains; the next press retries via engine_start.
+            // Now the app lives in the tray either way; start() itself
+            // writes the failure to engine.log and the tray tooltip, and
+            // the next press retries via engine_start.
             // But first: a previous hearit that died uncleanly may have
             // left its engine behind, still holding VRAM and port 8880.
             // Clear it before spawning ours, or we'd run two.
-            sidecar::reap_stale();
-            if let Err(e) = sidecar::start(app.handle()) {
-                eprintln!("[hearit] {e}");
-                tray::set_tooltip(app.handle(), &format!("hearit — {e}"));
-            }
+            sidecar::reap_stale(app.handle());
+            let _ = sidecar::start(app.handle());
             println!("[hearit] speak key on {}", hotkey::SPEAK_KEY);
             Ok(())
         })
@@ -328,6 +341,10 @@ pub fn run() {
         .expect("error building hearit")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                // One durable line per clean exit: in engine.log it
+                // separates "the app quit" from "the app vanished" when
+                // reading a timeline after the fact.
+                diag::log(app, "[hearit] exiting");
                 // The sidecar is our child; if we exit and leave it
                 // running, it squats on the port and ~2GB forever. The
                 // job object (sidecar.rs) would catch it anyway — this is

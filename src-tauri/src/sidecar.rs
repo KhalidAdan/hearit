@@ -61,7 +61,7 @@ fn job() -> windows_sys::Win32::Foundation::HANDLE {
 ///
 /// Only processes whose image path is exactly OUR resolved sidecar exe
 /// are touched — a koko belonging to some other tool is not ours to kill.
-pub fn reap_stale() {
+pub fn reap_stale(app: &AppHandle) {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
@@ -108,9 +108,12 @@ pub fn reap_stale() {
                             .map(|p| p.to_string_lossy().to_lowercase())
                             .unwrap_or_else(|_| path.to_lowercase());
                         if theirs == ours {
-                            println!(
-                                "[hearit] reaping stale koko (pid {}) from a previous run",
-                                entry.th32ProcessID
+                            crate::diag::log(
+                                app,
+                                &format!(
+                                    "[hearit] reaping stale koko (pid {}) from a previous run",
+                                    entry.th32ProcessID
+                                ),
                             );
                             TerminateProcess(proc, 1);
                         }
@@ -132,22 +135,64 @@ pub struct Ready(pub AtomicBool);
 
 pub struct Sidecar(pub Mutex<Option<Child>>);
 
-/// Start the engine. Idempotent: a running engine is left alone.
+/// Start the engine. Idempotent: a running engine is left alone — where
+/// "running" is the OS's word, not ours (see try_start). Failures land in
+/// engine.log and on the tray tooltip, because for an installer-launched
+/// instance those are the only surfaces that exist.
 pub fn start(app: &AppHandle) -> Result<(), String> {
+    try_start(app).map_err(|e| {
+        crate::diag::log(app, &format!("[hearit] engine start failed: {e}"));
+        crate::tray::set_tooltip(app, &format!("hearit — {e}"));
+        e
+    })
+}
+
+fn try_start(app: &AppHandle) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     let sidecar = app.state::<Sidecar>();
     let mut guard = sidecar.0.lock().unwrap();
-    if guard.is_some() {
-        return Ok(());
+    // "A running engine is left alone" — but a held Child proves only
+    // that we SPAWNED an engine, not that it's alive. The 2026-08-04
+    // instance held a corpse here: koko had died outside sleep()'s
+    // control, every wake press no-opped against the dead handle, and
+    // the key stayed broken until the whole app was killed. Ask the OS.
+    match guard.as_mut().map(|c| c.try_wait()) {
+        None => {}                       // nothing held — spawn below
+        Some(Ok(None)) => return Ok(()), // alive — the common case
+        Some(Ok(Some(status))) => {
+            crate::diag::log(
+                app,
+                &format!("[hearit] engine died unnoticed ({status}) — respawning; koko-stderr.log has its last words"),
+            );
+        }
+        Some(Err(e)) => {
+            crate::diag::log(app, &format!("[hearit] engine state unknowable ({e}) — respawning"));
+        }
     }
+    // Whatever we held is dead or unknowable: reap it and start fresh.
+    if let Some(mut dead) = guard.take() {
+        let _ = dead.kill();
+        let _ = dead.wait();
+    }
+    app.state::<Ready>().0.store(false, Ordering::Relaxed);
 
     // Companions are found at runtime (env override, next-to-exe, or repo
     // layout) — see paths.rs. The same exe works everywhere.
     let server = crate::paths::sidecar_exe()?;
     let model = crate::paths::model()?;
     let voices = crate::paths::voices()?;
+    // koko's dying words, kept: a CUDA/onnxruntime init failure prints to
+    // stderr in the milliseconds before the process is gone, and an
+    // inherited stderr goes nowhere in an installed instance. Fresh file
+    // per spawn — always the LAST engine's story, bounded by construction.
+    // (A loader failure — missing DLL — writes nothing anywhere; its exit
+    // status, 0xc0000135, is caught by the try_wait above and in warmup.)
+    let stderr = crate::diag::dir(app)
+        .and_then(|d| std::fs::File::create(d.join("koko-stderr.log")).ok())
+        .map(std::process::Stdio::from)
+        .unwrap_or_else(std::process::Stdio::inherit);
     // CLI verified against kokoros b54354b: model and voices are GLOBAL
     // flags and must come before the `openai` subcommand; --ip/--port
     // belong to the subcommand (docs/sidecar.md).
@@ -163,6 +208,7 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
             "--port",
             &synth::SIDECAR_PORT.to_string(),
         ])
+        .stderr(stderr)
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map_err(|e| format!("failed to spawn kokoro sidecar: {e}"))?;
@@ -176,13 +222,14 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
             child.as_raw_handle() as _,
         ) == 0
         {
-            eprintln!("[hearit] couldn't assign koko to the job object");
+            crate::diag::log(app, "[hearit] couldn't assign koko to the job object");
         }
     }
+    let pid = child.id();
     *guard = Some(child);
     drop(guard);
 
-    println!("[hearit] engine waking");
+    crate::diag::log(app, &format!("[hearit] engine waking (koko pid {pid})"));
     let _ = app.emit("engine_waking", ());
     tauri::async_runtime::spawn(warmup(app.clone(), std::time::Instant::now()));
     Ok(())
@@ -198,7 +245,7 @@ pub fn sleep(app: &AppHandle) {
         // Reap the process object so "VRAM freed" below is true, not hopeful.
         let _ = child.wait();
         app.state::<Ready>().0.store(false, Ordering::Relaxed);
-        println!("[hearit] engine sleeping — VRAM freed");
+        crate::diag::log(app, "[hearit] engine sleeping — VRAM freed");
         let _ = app.emit("engine_sleeping", ());
     }
 }
@@ -208,16 +255,41 @@ pub fn sleep(app: &AppHandle) {
 /// first real press of the day speaks as fast as the hundredth.
 async fn warmup(app: AppHandle, spawned: std::time::Instant) {
     for probe in 1..=60u32 {
-        // The app may be shutting down mid-warmup; stop probing.
-        if app.state::<Sidecar>().0.lock().unwrap().is_none() {
-            return;
+        // Two reasons to stop probing: the app is shutting down (or the
+        // engine was put to sleep) — the mutex is empty; or the engine we
+        // are warming is already a corpse — a koko that can't bring up
+        // its CUDA runtime dies in milliseconds, and probing a corpse for
+        // 60s just lets the take time out with nothing recorded. Taking
+        // the corpse out also means the next press respawns instead of
+        // no-opping against it.
+        {
+            let sidecar = app.state::<Sidecar>();
+            let mut guard = sidecar.0.lock().unwrap();
+            let died = match guard.as_mut() {
+                None => return,
+                Some(child) => child.try_wait().ok().flatten(),
+            };
+            if let Some(status) = died {
+                guard.take();
+                drop(guard);
+                crate::diag::log(
+                    &app,
+                    &format!("[hearit] engine died during warmup ({status}) — koko-stderr.log has its last words"),
+                );
+                crate::tray::set_tooltip(&app, "hearit — engine died during warmup (see engine.log)");
+                let _ = app.emit("pipeline_error", "engine died during warmup");
+                return;
+            }
         }
         match synth::probe().await {
             Ok(()) => {
-                println!(
-                    "[timing] engine warm and ready in {:.1}s ({probe} probe{})",
-                    spawned.elapsed().as_secs_f32(),
-                    if probe == 1 { "" } else { "s" }
+                crate::diag::log(
+                    &app,
+                    &format!(
+                        "[timing] engine warm and ready in {:.1}s ({probe} probe{})",
+                        spawned.elapsed().as_secs_f32(),
+                        if probe == 1 { "" } else { "s" }
+                    ),
                 );
                 app.state::<Ready>().0.store(true, Ordering::Relaxed);
                 let _ = app.emit("sidecar_ready", ());
@@ -226,6 +298,6 @@ async fn warmup(app: AppHandle, spawned: std::time::Instant) {
             Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
         }
     }
-    eprintln!("[hearit] engine never became ready");
+    crate::diag::log(&app, "[hearit] engine never became ready");
     let _ = app.emit("pipeline_error", "engine never became ready");
 }

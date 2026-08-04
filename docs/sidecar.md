@@ -65,6 +65,14 @@ died silently at setup. The update check now runs before the sidecar
 start for the same reason: a broken sidecar must never block the update
 that fixes it.)
 
+When something goes wrong in an installed instance, the story survives:
+every engine lifecycle event (boot, spawn with pid, warm, sleep, death
+with exit status, update install) is appended to `engine.log` in the app
+config dir, next to `dead-air-log.csv`, and koko's stderr from the most
+recent spawn is kept as `koko-stderr.log`. An installer-launched hearit
+has no console — the 2026-08-04 wake failure taught us that a tooltip
+and a silent pill are not a diagnosis.
+
 Model sources (what `download_all.sh` in the kokoros repo uses):
 
 - model: `https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX-timestamped/resolve/main/onnx/model.onnx` (~310MB)

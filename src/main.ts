@@ -238,8 +238,13 @@ const onPressed = (stampMs: number) =>
     // is idempotent — one cheap IPC when it's already up — and
     // synth_waiting's patience absorbs the warmup when it isn't. A
     // pending sleep must not fire mid-take.
+    //
+    // NOT ignored (2026-08-04's lesson): an Err here means Rust could
+    // not produce an engine — no spawn is coming, and every path forward
+    // is a 45s dead pill. Let catchAll end the take now; Rust has
+    // already written the why to engine.log and the tray tooltip.
     yield* cancelSleepTimer;
-    yield* cmd("engine_start").pipe(Effect.ignore);
+    yield* cmd("engine_start");
 
     // New selection wins: speak_begin stops the old voice inside Rust and
     // hands back a take token — audio from any older take can never reach
