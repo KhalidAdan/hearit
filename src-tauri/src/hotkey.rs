@@ -79,12 +79,16 @@ pub fn on_shortcut(app: &AppHandle, state: ShortcutState) {
             if is_fresh_press(was_down, last, now) {
                 if was_down {
                     // The flag said held but the silence said otherwise —
-                    // a release went missing and we just recovered. Worth
-                    // a durable line: this is the incident that once left
-                    // the key dead while the app looked healthy.
-                    println!(
-                        "[hearit] speak key healed — fresh press after {}ms of silence with the down-flag still set (a release went missing)",
-                        now.saturating_sub(last)
+                    // a release went missing and we just recovered. Durable
+                    // on purpose: this is the incident that once left the
+                    // key dead while the app looked healthy, and an
+                    // installed instance has no console to confess on.
+                    crate::diag::log(
+                        app,
+                        &format!(
+                            "[hearit] speak key healed — fresh press after {}ms of silence with the down-flag still set (a release went missing)",
+                            now.saturating_sub(last)
+                        ),
                     );
                 }
                 let _ = app.emit("speak_pressed", now);
