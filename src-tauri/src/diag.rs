@@ -25,6 +25,12 @@ const MAX_BYTES: u64 = 256 * 1024;
 pub fn log(app: &AppHandle, line: &str) {
     println!("{line}");
     let Some(dir) = dir(app) else { return };
+    append(&dir, line);
+}
+
+/// The file half of log(), split from the AppHandle so the rotation
+/// contract — shelve, never truncate — is testable.
+fn append(dir: &std::path::Path, line: &str) {
     let path = dir.join("engine.log");
     if std::fs::metadata(&path).map(|m| m.len() > MAX_BYTES).unwrap_or(false) {
         let shelf = dir.join("engine-old.log");
@@ -39,5 +45,31 @@ pub fn log(app: &AppHandle, line: &str) {
         .unwrap_or(0);
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
         let _ = writeln!(f, "{stamp} {line}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_full_ledger_is_shelved_not_truncated() {
+        let dir = std::env::temp_dir().join("hearit-diag-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let over = (MAX_BYTES + 1) as usize;
+        std::fs::write(dir.join("engine.log"), vec![b'x'; over]).unwrap();
+
+        append(&dir, "[hearit] boot");
+
+        // Every old byte survived, on the shelf — the tail being
+        // investigated must never be the rotation's casualty.
+        let old = std::fs::read(dir.join("engine-old.log")).unwrap();
+        assert_eq!(old.len(), over);
+        // And the fresh ledger starts over with just the new line.
+        let new = std::fs::read_to_string(dir.join("engine.log")).unwrap();
+        assert!(new.trim_end().ends_with("[hearit] boot"));
+        assert_eq!(new.lines().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -135,6 +135,33 @@ pub struct Ready(pub AtomicBool);
 
 pub struct Sidecar(pub Mutex<Option<Child>>);
 
+/// What the Sidecar slot actually holds, as the OS tells it — not as we
+/// hope. v0.2.4 collapsed Alive and Dead into `is_some()`, and that
+/// collapse was the 2026-08-04 wake failure: a koko that died outside
+/// sleep()'s control left its corpse in the slot, and every wake press
+/// no-opped against it until the whole app was restarted. Classification
+/// is its own function so the tests can hold a real corpse up to it.
+#[derive(Debug)]
+enum ChildState {
+    /// Nothing held — spawn freely.
+    Absent,
+    /// Running right now (it may of course die right after answering).
+    Alive,
+    /// Held but exited: the corpse. The status says how it died.
+    Dead(std::process::ExitStatus),
+    /// try_wait failed; the handle can't be trusted.
+    Unknown(String),
+}
+
+fn child_state(slot: &mut Option<Child>) -> ChildState {
+    match slot.as_mut().map(|c| c.try_wait()) {
+        None => ChildState::Absent,
+        Some(Ok(None)) => ChildState::Alive,
+        Some(Ok(Some(status))) => ChildState::Dead(status),
+        Some(Err(e)) => ChildState::Unknown(e.to_string()),
+    }
+}
+
 /// Start the engine. Idempotent: a running engine is left alone — where
 /// "running" is the OS's word, not ours (see try_start). Failures land in
 /// engine.log and on the tray tooltip, because for an installer-launched
@@ -154,20 +181,17 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
     let sidecar = app.state::<Sidecar>();
     let mut guard = sidecar.0.lock().unwrap();
     // "A running engine is left alone" — but a held Child proves only
-    // that we SPAWNED an engine, not that it's alive. The 2026-08-04
-    // instance held a corpse here: koko had died outside sleep()'s
-    // control, every wake press no-opped against the dead handle, and
-    // the key stayed broken until the whole app was killed. Ask the OS.
-    match guard.as_mut().map(|c| c.try_wait()) {
-        None => {}                       // nothing held — spawn below
-        Some(Ok(None)) => return Ok(()), // alive — the common case
-        Some(Ok(Some(status))) => {
+    // that we SPAWNED an engine, not that it's alive (see ChildState).
+    match child_state(&mut guard) {
+        ChildState::Absent => {}               // nothing held — spawn below
+        ChildState::Alive => return Ok(()),    // the common case
+        ChildState::Dead(status) => {
             crate::diag::log(
                 app,
                 &format!("[hearit] engine died unnoticed ({status}) — respawning; koko-stderr.log has its last words"),
             );
         }
-        Some(Err(e)) => {
+        ChildState::Unknown(e) => {
             crate::diag::log(app, &format!("[hearit] engine state unknowable ({e}) — respawning"));
         }
     }
@@ -265,9 +289,10 @@ async fn warmup(app: AppHandle, spawned: std::time::Instant) {
         {
             let sidecar = app.state::<Sidecar>();
             let mut guard = sidecar.0.lock().unwrap();
-            let died = match guard.as_mut() {
-                None => return,
-                Some(child) => child.try_wait().ok().flatten(),
+            let died = match child_state(&mut guard) {
+                ChildState::Absent => return,
+                ChildState::Alive | ChildState::Unknown(_) => None,
+                ChildState::Dead(status) => Some(status),
             };
             if let Some(status) = died {
                 guard.take();
@@ -300,4 +325,67 @@ async fn warmup(app: AppHandle, spawned: std::time::Instant) {
     }
     crate::diag::log(&app, "[hearit] engine never became ready");
     let _ = app.emit("pipeline_error", "engine never became ready");
+}
+
+// The 2026-08-04 regression, pinned with real processes: v0.2.4 decided
+// "running" by `is_some()`, so an engine that died outside sleep()'s
+// control left a corpse the wake press would no-op against forever.
+// These tests hold actual corpses and actual live children up to
+// child_state — the seam both try_start and warmup now trust.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    /// A just-spawned process needs a moment to die; poll until the OS
+    /// calls it dead (10s is far beyond generous for `cmd /C exit`).
+    fn classify_until_dead(slot: &mut Option<Child>) -> std::process::ExitStatus {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match child_state(slot) {
+                ChildState::Dead(status) => return status,
+                _ if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(50))
+                }
+                state => panic!("child never became a corpse: {state:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn an_empty_slot_is_absent() {
+        assert!(matches!(child_state(&mut None), ChildState::Absent));
+    }
+
+    #[test]
+    fn a_corpse_is_not_a_running_engine() {
+        // An engine that died moments after spawn, exit code and all —
+        // the exact shape v0.2.4 mistook for "running" because the slot
+        // was still Some.
+        let child = Command::new("cmd").args(["/C", "exit", "7"]).spawn().unwrap();
+        let mut slot = Some(child);
+        let status = classify_until_dead(&mut slot);
+        assert_eq!(status.code(), Some(7), "the corpse keeps its exit code for the ledger");
+        // Asking again still says Dead: classification is stable, so the
+        // respawn path can log AND reap without racing itself.
+        assert!(matches!(child_state(&mut slot), ChildState::Dead(_)));
+    }
+
+    #[test]
+    fn a_live_engine_is_left_alone_and_a_killed_one_is_not() {
+        // ~29s of life — plenty to observe Alive, nowhere near test-slow.
+        let child = Command::new("ping")
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut slot = Some(child);
+        assert!(matches!(child_state(&mut slot), ChildState::Alive));
+        // The same seam sees the death sleep() causes.
+        let running = slot.as_mut().unwrap();
+        running.kill().unwrap();
+        let _ = running.wait();
+        assert!(matches!(child_state(&mut slot), ChildState::Dead(_)));
+    }
 }
