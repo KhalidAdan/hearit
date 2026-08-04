@@ -1,6 +1,6 @@
 [package]
 name = "hearit"
-version = "0.2.3"
+version = "0.2.4"
 license = "MIT"
 description = "The key that speaks. Select anything, press the key, hear it read aloud."
 authors = ["Khalid"]
