@@ -354,7 +354,10 @@ pub fn run() {
                     let _ = child.wait();
                 }
                 // Any downloaded update applies now, while we're already
-                // going down — never mid-session.
+                // going down — never mid-session. MUST stay after the
+                // sidecar kill: the plugin's install() launches the NSIS
+                // installer and then calls std::process::exit(0) — nothing
+                // below it ever runs.
                 update::install_if_staged(app);
             }
         });
